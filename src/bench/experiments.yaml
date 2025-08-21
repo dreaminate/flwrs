@@ -1,0 +1,30 @@
+# 批量实验清单：每个 experiment 一次模拟
+experiments:
+  - name: "cohort_trimmed"
+    strategy: "multimodel"
+    models: ["tft", "tcn", "nbeats"]
+    rounds: 20
+    clients: 30
+    params:
+      aggregator: "trimmed"
+      trim_ratio: 0.1
+
+  - name: "robust_median_fedprox"
+    strategy: "robust"
+    models: ["tft"]          # 单模型族示例
+    rounds: 20
+    clients: 24
+    params:
+      aggregator: "median"
+      mu_prox: 0.01
+      dp_max_norm: 1.0
+      dp_sigma: 0.0
+
+  - name: "fedopt_adam"
+    strategy: "fedopt"
+    models: ["tft"]
+    rounds: 20
+    clients: 24
+    params:
+      fedopt_variant: "adam"
+      fedopt_lr: 0.03
