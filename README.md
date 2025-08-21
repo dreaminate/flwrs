@@ -319,6 +319,3 @@ python src/run_bench.py --config experiments.yaml --out bench_results
 
 根据实际项目选择（MIT/Apache-2.0/BSD-3-Clause 等）。
 
----
-
-如果你想把 **当前实验** 精确地写进一份 `experiments.yaml`，直接把你打算的参数发我，我按这套 CLI 格式生成可用模板。
