@@ -1,0 +1,21 @@
+{
+  "bucket": "ts_transformer",
+  "num_arrays": 2,
+  "shapes": [
+    [
+      4,
+      16
+    ],
+    [
+      128,
+      4
+    ]
+  ],
+  "dtypes": [
+    "float32",
+    "float32"
+  ],
+  "strategy": "fedper_cohort",
+  "share_prefix": "adapter.",
+  "dp_mode": "client"
+}

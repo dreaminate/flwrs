@@ -1,5 +1,15 @@
-{"round": 1, "bucket": "tcn", "dp_mode": "client", "clip": 1.0, "sigma": 1.2, "epsilon": 4.34599381571229, "delta": 1e-05}
-{"round": 2, "bucket": "lstm", "dp_mode": "client", "clip": 1.0, "sigma": 0.8, "epsilon": 6.779407390235101, "delta": 1e-05}
-{"round": 3, "bucket": "lstm", "dp_mode": "client", "clip": 1.0, "sigma": 0.8, "epsilon": 10.04517553051889, "delta": 1e-05}
-{"round": 4, "bucket": "lstm", "dp_mode": "client", "clip": 1.0, "sigma": 0.8, "epsilon": 12.732863351681935, "delta": 1e-05}
-{"round": 5, "bucket": "lstm", "dp_mode": "client", "clip": 1.0, "sigma": 0.8, "epsilon": 15.121314780470202, "delta": 1e-05}
+{"ts": 1755764730.761584, "round": 1, "bucket": "ts_transformer", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.6, "delta": 1e-05}, "epsilon": 9.386432075869024, "num_results": 2}
+{"ts": 1755764731.2241378, "round": 2, "bucket": "ts_transformer", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.6, "delta": 1e-05}, "epsilon": 14.088011818469631, "num_results": 2}
+{"ts": 1755764731.610802, "round": 3, "bucket": "ts_transformer", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.6, "delta": 1e-05}, "epsilon": 18.01881780224258, "num_results": 2}
+{"ts": 1755764732.018493, "round": 4, "bucket": "ts_transformer", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.6, "delta": 1e-05}, "epsilon": 21.550641929515827, "num_results": 2}
+{"ts": 1755764732.4349983, "round": 5, "bucket": "ts_transformer", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.6, "delta": 1e-05}, "epsilon": 24.827494663522337, "num_results": 2}
+{"ts": 1755764914.1202338, "round": 1, "bucket": "tcn", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.8, "delta": 1e-05}, "epsilon": 6.779407390235101, "num_results": 1}
+{"ts": 1755764914.1207516, "round": 1, "bucket": "ts_transformer", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.6, "delta": 1e-05}, "epsilon": 9.386432075869024, "num_results": 1}
+{"ts": 1755764914.5927336, "round": 2, "bucket": "ts_transformer", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.6, "delta": 1e-05}, "epsilon": 14.088011818469631, "num_results": 1}
+{"ts": 1755764914.593743, "round": 2, "bucket": "tcn", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.8, "delta": 1e-05}, "epsilon": 10.04517553051889, "num_results": 1}
+{"ts": 1755764915.0374534, "round": 3, "bucket": "ts_transformer", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.6, "delta": 1e-05}, "epsilon": 18.01881780224258, "num_results": 1}
+{"ts": 1755764915.0384636, "round": 3, "bucket": "tcn", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.8, "delta": 1e-05}, "epsilon": 12.732863351681935, "num_results": 1}
+{"ts": 1755764915.5098035, "round": 4, "bucket": "tcn", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.8, "delta": 1e-05}, "epsilon": 15.121314780470202, "num_results": 1}
+{"ts": 1755764915.5103207, "round": 4, "bucket": "ts_transformer", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.6, "delta": 1e-05}, "epsilon": 21.550641929515827, "num_results": 1}
+{"ts": 1755764916.022475, "round": 5, "bucket": "tcn", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.8, "delta": 1e-05}, "epsilon": 17.31853766430842, "num_results": 1}
+{"ts": 1755764916.0234752, "round": 5, "bucket": "ts_transformer", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.6, "delta": 1e-05}, "epsilon": 24.827494663522337, "num_results": 1}

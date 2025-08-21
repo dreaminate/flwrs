@@ -6,13 +6,13 @@ import flwr as fl
 import numpy as np
 import torch
 
+from strategies.fedper_cohort import FedPerCohort, DpCfg
 from strategies.multimodel_cohort import MultiModelCohort
 from strategies.robust_dp_fedprox import RobustDPFedProx
 from strategies.fedopt import FedOptLike
 
 from models.registry import MODEL_BUILDERS
-from clients.hetero_client import HeteroModelClient, pack_state, unpack_state
-# ❌ 不在顶部导入 FedPerClient，避免未使用策略时报错；按需在 client_fn 内部导入
+from clients.hetero_client import HeteroModelClient, pack_state  # unpack_state 不用可删
 
 # ✅ Adapter/LoRA 注入工具（功能3）
 from models.adapters import inject_adapters, freeze_non_adapter, count_params
@@ -20,14 +20,22 @@ from models.adapters import inject_adapters, freeze_non_adapter, count_params
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--strategy", type=str, default="multimodel",
-                   choices=["multimodel", "robust", "fedopt", "fedper"])
+    p.add_argument(
+        "--strategy",
+        type=str,
+        default="multimodel",
+        choices=["multimodel", "robust", "fedopt", "fedper", "fedper_cohort"],
+    )
     # 默认三种时间序列模型
     p.add_argument("--models", type=str, default="lstm,tcn,ts_transformer")
     p.add_argument("--rounds", type=int, default=20)
     p.add_argument("--clients", type=int, default=30)
-    p.add_argument("--aggregator", type=str, default="trimmed",
-                   choices=["weighted", "median", "trimmed"])
+    p.add_argument(
+        "--aggregator",
+        type=str,
+        default="trimmed",
+        choices=["weighted", "median", "trimmed"],
+    )
     p.add_argument("--trim_ratio", type=float, default=0.1)
     p.add_argument("--mu_prox", type=float, default=0.0)
     p.add_argument("--dp_max_norm", type=float, default=1.0)
@@ -37,7 +45,7 @@ def parse_args():
     p.add_argument("--min_fit", type=int, default=2)
 
     # ✅ 功能2：细粒度 DP 下发/记账
-    p.add_argument("--dp_mode", type=str, default="client", choices=["client","server"])
+    p.add_argument("--dp_mode", type=str, default="client", choices=["client", "server"])
     p.add_argument("--dp_clip_map", type=str, default="")   # 例: "lstm:1.0,tcn:0.5,ts_transformer:1.5"
     p.add_argument("--dp_sigma_map", type=str, default="")  # 例: "lstm:0.8,tcn:1.2,ts_transformer:0.6"
     p.add_argument("--dp_delta_map", type=str, default="")  # 例: "lstm:1e-5,tcn:1e-6"
@@ -49,9 +57,8 @@ def parse_args():
     p.add_argument("--adapter_rank", type=int, default=4, help="LoRA rank 或 MLP bottleneck")
     p.add_argument("--adapter_alpha", type=int, default=16, help="LoRA scaling alpha")
     p.add_argument("--adapter_dropout", type=float, default=0.0, help="Adapter/LoRA dropout")
-    p.add_argument("--share_prefix", type=str, default="adapter.", help="要共享的参数名片段（FedPer 客户端会只共享含此片段的权重）")
+    p.add_argument("--share_prefix", type=str, default="adapter.", help="要共享的参数名片段（FedPer 客户端只共享含此片段的权重）")
     p.add_argument("--freeze_non_adapter", action="store_true", help="冻结所有非 share_prefix 参数")
-
     return p.parse_args()
 
 
@@ -73,7 +80,7 @@ def build_init_params_map(model_names: List[str]) -> Dict[str, List[np.ndarray]]
 
 
 # ✅ 功能3：在构建客户端模型时按需注入 Adapter/LoRA，并可冻结非 adapter 参数
-def make_client_fn(strategy: str, model_names: list[str], args):
+def make_client_fn(strategy: str, model_names: List[str], args):
     assign_fn = assign_fn_factory(model_names)
 
     def _build_and_inject(mname: str):
@@ -85,6 +92,7 @@ def make_client_fn(strategy: str, model_names: list[str], args):
                 rank=args.adapter_rank,
                 alpha=args.adapter_alpha,
                 dropout=args.adapter_dropout,
+                # 排除规则放在 adapters.py 的默认里；这里不覆写，避免 _Wrap.weight 报错
             )
             if args.freeze_non_adapter:
                 freeze_non_adapter(model, share_substr=args.share_prefix)
@@ -98,8 +106,8 @@ def make_client_fn(strategy: str, model_names: list[str], args):
         cid = str(context.node_id)
         mname = assign_fn(cid)
         model = _build_and_inject(mname)
-        if strategy == "fedper":
-            # 仅在使用 FedPer 时导入，避免未用模块报错
+        if strategy in ("fedper", "fedper_cohort"):
+            # 仅在使用 FedPer/FedPerCohort 时导入
             from clients.fedper_client import FedPerClient
             return FedPerClient(model=model, model_name=mname, cid=cid, share_substr=args.share_prefix).to_client()
         else:
@@ -128,16 +136,16 @@ def main():
     clip_map  = _parse_map(args.dp_clip_map, 1.0, model_names)
     sigma_map = _parse_map(args.dp_sigma_map, 0.0, model_names)
     delta_map = _parse_map(args.dp_delta_map, 1e-5, model_names) if args.dp_delta_map else {n: 1e-5 for n in model_names}
-
     dp_cfg_map = {n: {"clip": clip_map[n], "sigma": sigma_map[n], "delta": delta_map[n]} for n in model_names}
 
     # 选择策略
+    if args.clients <= 2:
+        frac_fit, frac_eval = 1.0, 1.0
+    else:
+        frac_fit, frac_eval = 0.33, 0.25
+
     if args.strategy == "multimodel":
         init_map = build_init_params_map(model_names)
-        if args.clients <= 2:
-            frac_fit, frac_eval = 1.0, 1.0
-        else:
-            frac_fit, frac_eval = 0.33, 0.25
         strategy = MultiModelCohort(
             init_params_map=init_map,
             assign_fn=assign_fn_factory(model_names),
@@ -150,6 +158,7 @@ def main():
             min_fit_clients=args.min_fit, min_available_clients=args.min_fit,
             accept_failures=True,
         )
+
     elif args.strategy == "robust":
         strategy = RobustDPFedProx(
             dp_max_norm=args.dp_max_norm, dp_noise_sigma=args.dp_sigma,
@@ -159,6 +168,7 @@ def main():
             min_fit_clients=args.min_fit, min_available_clients=args.min_fit,
             accept_failures=True,
         )
+
     elif args.strategy == "fedopt":
         strategy = FedOptLike(
             lr=args.fedopt_lr, variant=args.fedopt_variant,
@@ -166,18 +176,36 @@ def main():
             min_fit_clients=args.min_fit, min_available_clients=args.min_fit,
             accept_failures=True,
         )
+
     elif args.strategy == "fedper":
-        # FedPer 侧仅客户端控制“只共享 share_prefix”；服务端可用通用稳健策略
+        # 传统 FedPer：单桶单全局，要求同构，否则会 shape mismatch
         strategy = RobustDPFedProx(
             robust=args.aggregator, trim_ratio=args.trim_ratio,
             fraction_fit=0.5, fraction_evaluate=0.3,
             min_fit_clients=args.min_fit, min_available_clients=args.min_fit,
             accept_failures=True,
         )
+
+    elif args.strategy == "fedper_cohort":
+        # ✅ FedPer 的“分桶聚合”版：各模型/签名各自聚合共享子集
+        dp_cfg_map_dc = {k: DpCfg(clip=v["clip"], sigma=v["sigma"], delta=v["delta"]) for k, v in dp_cfg_map.items()}
+        strategy = FedPerCohort(
+            assign_fn=assign_fn_factory(model_names),
+            aggregator=args.aggregator,
+            trim_ratio=args.trim_ratio,
+            fraction_fit=(1.0 if args.clients <= 2 else 0.5),
+            fraction_evaluate=(1.0 if args.clients <= 2 else 0.5),
+            min_fit_clients=args.min_fit, min_available_clients=args.min_fit,
+            accept_failures=True,
+            dp_cfg_map=dp_cfg_map_dc,
+            dp_mode=args.dp_mode,                # "client" 或 "server"
+            policy_id=args.dp_policy_id,
+            share_prefix=args.share_prefix,
+        )
+
     else:
         raise ValueError("unknown strategy")
 
-    # ✅ 使用带 args 的 client_fn（此前少传了 args 会报错）
     client_fn = make_client_fn(args.strategy, model_names, args)
 
     fl.simulation.start_simulation(
@@ -189,8 +217,20 @@ def main():
     )
 
     if hasattr(strategy, "params_map"):
-        from utils.common import save_params_map
-        save_params_map(strategy.params_map, MODEL_BUILDERS, out_dir="ckpt")
+        from utils.common import save_params_map, save_shared_params_map
+        if args.strategy == "multimodel":
+            save_params_map(strategy.params_map, MODEL_BUILDERS, out_dir="ckpt")
+        elif args.strategy in ("fedper", "fedper_cohort"):
+            # 只保存共享子集（adapter）
+            # 可选传一些元信息，便于追踪
+            meta = {}
+            for k, v in strategy.params_map.items():
+                meta[k] = {
+                    "strategy": args.strategy,
+                    "share_prefix": getattr(strategy, "share_prefix", "adapter."),
+                    "dp_mode": getattr(strategy, "dp_mode", ""),
+                }
+            save_shared_params_map(strategy.params_map, out_dir="ckpt_shared", meta=meta)
 
     print("[done] experiment finished.")
 

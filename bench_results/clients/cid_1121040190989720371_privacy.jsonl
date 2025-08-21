@@ -1,0 +1,1 @@
+{"ts": 1755763839.8701055, "cid": "1121040190989720371", "model_name": "ts_transformer", "policy_id": "", "dp_sig": "", "dp_mode": "client", "dp": {"clip": 0.0, "sigma": 0.0}, "delta_norm": null, "est_post_clip_norm": null, "applied": false, "train_metrics": {"train_loss": 1.26627516746521}, "share_substr": "adapter."}

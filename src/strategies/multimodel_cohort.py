@@ -163,21 +163,33 @@ class MultiModelCohort(FedAvg):
         # 备份上一轮
         prev_map = {name: [a.copy() for a in arrs] for name, arrs in self.params_map.items()}
 
-        # 分桶
+        # 分桶 & 同时统计训练损失
         buckets: Dict[str, List[Tuple[float, List[np.ndarray]]]] = {}
+        train_stats: Dict[str, Dict[str, float]] = {}  # {bucket: {"sum_wloss":..., "sum_w":..., "n":...}}
         for client_proxy, fit_res in results:
             arrs = parameters_to_ndarrays(fit_res.parameters)
-            w = float(getattr(fit_res, "num_examples", 1))
+            n = float(getattr(fit_res, "num_examples", 1))
             mname = None
             if fit_res.metrics:
                 mname = fit_res.metrics.get("model_name")
             if not mname:
                 mname = self.cid2model.get(client_proxy.cid, self.assign_fn(client_proxy.cid))
-            buckets.setdefault(mname, []).append((w, arrs))
+            buckets.setdefault(mname, []).append((n, arrs))
+
+            # 训练损失（可选）
+            tl = None
+            if fit_res.metrics:
+                tl = fit_res.metrics.get("train_loss")
+            if tl is not None:
+                st = train_stats.setdefault(mname, {"sum_wloss": 0.0, "sum_w": 0.0, "n": 0.0})
+                st["sum_wloss"] += n * float(tl)
+                st["sum_w"] += n
+                st["n"] += n
 
         # 聚合 + 记账 + 日志
         for mname, items in buckets.items():
             dp = self.dp_cfg_map[mname]
+
             # 可选：服务端 DP
             if self.dp_mode == "server" and (dp.clip > 0 or dp.sigma > 0):
                 dp_items: List[Tuple[float, List[np.ndarray]]] = []
@@ -215,5 +227,55 @@ class MultiModelCohort(FedAvg):
                 "num_results": len(items),
             })
 
+        # ✅ 终端打印各桶训练损失（加权平均）
+        for mname, st in sorted(train_stats.items()):
+            if st["sum_w"] > 0:
+                avg = st["sum_wloss"] / st["sum_w"]
+                print(f"[round {server_round}] train[{mname}] = {avg:.6f} (n={int(st['sum_w'])})")
+                # 可选：落盘一份
+                log_jsonl(os.path.join("bench_results", "bucket_metrics.jsonl"), {
+                    "ts": time.time(), "round": server_round, "type": "train",
+                    "bucket": mname, "loss": avg, "n": int(st["sum_w"])
+                })
+
         any_name = next(iter(self.params_map))
         return ndarrays_to_parameters(self.params_map[any_name]), {}
+
+    def aggregate_evaluate(self, server_round: int, results: List[Tuple], failures):
+        # 没有结果就沿用 Flower 默认行为
+        if not results:
+            return None
+
+        # 分桶统计验证损失（用 EvaluateRes.loss 加权）
+        per_bucket = {}  # {bucket: {"sum_wloss":..., "sum_w":...}}
+        total_wloss, total_w = 0.0, 0.0
+        for client_proxy, eval_res in results:
+            n = float(getattr(eval_res, "num_examples", 1))
+            loss = float(getattr(eval_res, "loss", None) or 0.0)
+            mname = None
+            if eval_res.metrics:
+                mname = eval_res.metrics.get("model_name")
+            if not mname:
+                mname = self.cid2model.get(client_proxy.cid, self.assign_fn(client_proxy.cid))
+
+            st = per_bucket.setdefault(mname, {"sum_wloss": 0.0, "sum_w": 0.0})
+            st["sum_wloss"] += n * loss
+            st["sum_w"] += n
+            total_wloss += n * loss
+            total_w += n
+
+        # ✅ 打印各桶验证损失
+        for mname, st in sorted(per_bucket.items()):
+            if st["sum_w"] > 0:
+                avg = st["sum_wloss"] / st["sum_w"]
+                print(f"[round {server_round}]  val[{mname}] = {avg:.6f} (n={int(st['sum_w'])})")
+                log_jsonl(os.path.join("bench_results", "bucket_metrics.jsonl"), {
+                    "ts": time.time(), "round": server_round, "type": "val",
+                    "bucket": mname, "loss": avg, "n": int(st["sum_w"])
+                })
+
+        # 返回总览给 Flower（它会打印 History (loss, distributed)）
+        overall = (total_wloss / total_w) if total_w > 0 else None
+        # 也把每桶的值塞进 metrics 里，便于后处理
+        metrics = {f"val_{k}": (v["sum_wloss"] / v["sum_w"]) for k, v in per_bucket.items() if v["sum_w"] > 0}
+        return (overall, metrics)

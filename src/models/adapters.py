@@ -88,7 +88,7 @@ def inject_adapters(
     alpha: int = 16,
     dropout: float = 0.0,
     target_types: Tuple[type, ...] = (nn.Linear, nn.Conv1d),
-    exclude_name_regex: str = r"(head|classifier|proj_out)",
+    exclude_name_regex: str = r"(head|classifier|proj_out|out_proj|self_attn|linear1|linear2)",
 ) -> nn.Module:
     """
     遍历模型，把目标层替换为带 adapter 的包装层。

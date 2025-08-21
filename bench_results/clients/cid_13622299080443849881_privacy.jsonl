@@ -1,0 +1,1 @@
+{"ts": 1755763841.3937333, "cid": "13622299080443849881", "model_name": "tcn", "policy_id": "", "dp_sig": "", "dp_mode": "client", "dp": {"clip": 0.0, "sigma": 0.0}, "delta_norm": 0.9060276693496178, "est_post_clip_norm": 0.9060276693496178, "applied": false, "train_metrics": {"train_loss": 1.394926905632019}, "share_substr": "adapter."}
