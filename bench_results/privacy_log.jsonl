@@ -1,0 +1,5 @@
+{"round": 1, "bucket": "tcn", "dp_mode": "client", "clip": 1.0, "sigma": 1.2, "epsilon": 4.34599381571229, "delta": 1e-05}
+{"round": 2, "bucket": "lstm", "dp_mode": "client", "clip": 1.0, "sigma": 0.8, "epsilon": 6.779407390235101, "delta": 1e-05}
+{"round": 3, "bucket": "lstm", "dp_mode": "client", "clip": 1.0, "sigma": 0.8, "epsilon": 10.04517553051889, "delta": 1e-05}
+{"round": 4, "bucket": "lstm", "dp_mode": "client", "clip": 1.0, "sigma": 0.8, "epsilon": 12.732863351681935, "delta": 1e-05}
+{"round": 5, "bucket": "lstm", "dp_mode": "client", "clip": 1.0, "sigma": 0.8, "epsilon": 15.121314780470202, "delta": 1e-05}

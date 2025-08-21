@@ -1,14 +1,15 @@
 from __future__ import annotations
 from typing import List, Tuple, Dict, Any
-import hashlib
+import hashlib, time, os
 import numpy as np
 import torch
 import flwr as fl
-from flwr.common import parameters_to_ndarrays, Parameters  # 用于安全转换
+from flwr.common import parameters_to_ndarrays, Parameters
+from privacy.dp import sanitize_update           # 本地 DP
+from privacy.audit import log_jsonl              # 客户端审计日志
 
-# ========== 指纹计算 ==========
+# ========== 指纹 ==========
 def _model_signature_from_state(state: Dict[str, torch.Tensor]) -> Dict[str, Any]:
-    # 以“层顺序 + 形状 + dtype”生成稳定哈希
     keys = sorted(state.keys())
     shapes = [tuple(state[k].shape) for k in keys]
     dtypes = [str(state[k].dtype).split(".")[-1] for k in keys]
@@ -16,7 +17,7 @@ def _model_signature_from_state(state: Dict[str, torch.Tensor]) -> Dict[str, Any
     h = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
     return {"sig_count": len(keys), "sig_hash": h}
 
-# ========== 权重打包/解包 ==========
+# ========== 打包/解包 ==========
 def pack_state(model: torch.nn.Module) -> List[np.ndarray]:
     state = model.state_dict()
     keys = sorted(state.keys())
@@ -32,7 +33,7 @@ def unpack_state(model: torch.nn.Module, arrays: List[np.ndarray]) -> None:
         new_state[k] = t
     model.load_state_dict(new_state, strict=True)
 
-# --------- 工具：安全转换 / 防御式加载 ----------
+# --------- 安全转换 / 防御式加载 ----------
 def _to_arrays(parameters_or_arrays) -> List[np.ndarray]:
     if isinstance(parameters_or_arrays, list):
         return parameters_or_arrays
@@ -40,13 +41,11 @@ def _to_arrays(parameters_or_arrays) -> List[np.ndarray]:
         return parameters_to_ndarrays(parameters_or_arrays)
     return parameters_or_arrays  # type: ignore
 
-def _maybe_load_params(model: torch.nn.Module, arrays: List[np.ndarray],
-                       expected_sig: Dict[str, Any] | None = None) -> bool:
+def _maybe_load_params(model: torch.nn.Module, arrays: List[np.ndarray], expected_sig: Dict[str, Any] | None = None) -> bool:
     keys = sorted(model.state_dict().keys())
     if not isinstance(arrays, list) or len(arrays) != len(keys):
         print(f"[warn] param length mismatch: expect={len(keys)}, got={len(arrays) if isinstance(arrays, list) else '??'}. Skip loading.")
         return False
-    # 如服务器发来 expected_sig，可再次校验
     if expected_sig is not None:
         st = model.state_dict()
         local_sig = _model_signature_from_state(st)
@@ -55,23 +54,21 @@ def _maybe_load_params(model: torch.nn.Module, arrays: List[np.ndarray],
             print(f"[warn] signature mismatch: local={local_sig}, expected={expected_sig}. Skip loading.")
             return False
     try:
-        unpack_state(model, arrays)
-        return True
+        unpack_state(model, arrays); return True
     except AssertionError as e:
-        print(f"[warn] unpack failed: {e}. Skip loading.")
-        return False
+        print(f"[warn] unpack failed: {e}. Skip loading."); return False
 
-# --------- 读取模型规格（dummy 生成数据用） ----------
+# ---------- dummy 数据规格 ----------
 def _get_model_specs(model: torch.nn.Module):
     seq_len = getattr(model, "seq_len", 32)
     in_dim  = getattr(model, "in_dim", 16)
     out_dim = getattr(model, "out_dim", 1)
     return seq_len, in_dim, out_dim
 
-# ========== 你要替换的两处（接入你的训练/评估） ==========
+# ---------- 你接入真实数据的位置 ----------
 def user_train_one_round(model: torch.nn.Module, model_name: str, cid: str, config: Dict[str, Any]) -> Dict[str, float]:
     model.train()
-    opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+    opt = torch.optim.Adam(model.parameters(), lr=float(config.get("lr", 1e-3)))
     loss_fn = torch.nn.MSELoss()
     T, F, O = _get_model_specs(model)
     x = torch.randn(256, T, F); y = torch.randn(256, O)
@@ -83,10 +80,8 @@ def user_evaluate(model: torch.nn.Module, model_name: str, cid: str, config: Dic
     T, F, O = _get_model_specs(model)
     with torch.no_grad():
         x = torch.randn(128, T, F); y = torch.randn(128, O)
-        pred = model(x)
-        loss = torch.nn.functional.mse_loss(pred, y)
+        pred = model(x); loss = torch.nn.functional.mse_loss(pred, y)
     return float(loss.item()), {"val_loss": float(loss.item())}
-# =======================================================
 
 class HeteroModelClient(fl.client.NumPyClient):
     def __init__(self, model: torch.nn.Module, model_name: str, cid: str):
@@ -94,26 +89,53 @@ class HeteroModelClient(fl.client.NumPyClient):
         self.model_name = model_name
         self.cid = cid
 
-    # ⭐ 关键：向服务器上报“模型名 + 指纹”
     def get_properties(self, config):
-        st = self.model.state_dict()
-        sig = _model_signature_from_state(st)
-        return {
-            "model_name": self.model_name,
-            "sig_count": sig["sig_count"],
-            "sig_hash": sig["sig_hash"],
-        }
+        return {"model_name": self.model_name, **_model_signature_from_state(self.model.state_dict())}
 
     def get_parameters(self, config):
         return pack_state(self.model)
 
     def fit(self, parameters, config):
-        arrays = _to_arrays(parameters)
+        arrays_in = _to_arrays(parameters)
         expected_sig = {k: config[k] for k in ["sig_count", "sig_hash"] if k in config}
-        _maybe_load_params(self.model, arrays, expected_sig=expected_sig)
+        _maybe_load_params(self.model, arrays_in, expected_sig=expected_sig)
 
+        # 训练
         train_metrics = user_train_one_round(self.model, self.model_name, self.cid, config)
         new_params = pack_state(self.model)
+
+        # 审计：delta 范数
+        delta = [n - p for n, p in zip(new_params, arrays_in)]
+        delta_norm = float(np.sqrt(sum(float((d.astype(np.float64) ** 2).sum()) for d in delta)))
+
+        # 本地 DP
+        dp_mode  = str(config.get("dp_mode", "client"))
+        dp_clip  = float(config.get("dp_clip", 0.0))
+        dp_sigma = float(config.get("dp_sigma", 0.0))
+        dp_sig   = str(config.get("dp_sig", ""))
+        policy_id = str(config.get("dp_policy_id", ""))
+
+        applied = False
+        est_post_clip = min(delta_norm, dp_clip) if dp_clip > 0 else delta_norm
+        if dp_mode == "client" and (dp_clip > 0 or dp_sigma > 0):
+            new_params = sanitize_update(arrays_in, new_params, dp_clip, dp_sigma)
+            applied = True
+
+        # 客户端审计日志
+        log_jsonl(os.path.join("bench_results", "clients", f"cid_{self.cid}_privacy.jsonl"), {
+            "ts": time.time(),
+            "cid": self.cid,
+            "model_name": self.model_name,
+            "policy_id": policy_id,
+            "dp_sig": dp_sig,
+            "dp_mode": dp_mode,
+            "dp": {"clip": dp_clip, "sigma": dp_sigma},
+            "delta_norm": delta_norm,
+            "est_post_clip_norm": est_post_clip,
+            "applied": applied,
+            "train_metrics": train_metrics,
+        })
+
         metrics = {"model_name": self.model_name, **_model_signature_from_state(self.model.state_dict())}
         metrics.update(train_metrics)
         num_examples = int(config.get("num_examples", 1000))
@@ -123,7 +145,6 @@ class HeteroModelClient(fl.client.NumPyClient):
         arrays = _to_arrays(parameters)
         expected_sig = {k: config[k] for k in ["sig_count", "sig_hash"] if k in config}
         _maybe_load_params(self.model, arrays, expected_sig=expected_sig)
-
         loss, metrics = user_evaluate(self.model, self.model_name, self.cid, config)
         metrics.update(_model_signature_from_state(self.model.state_dict()))
         return loss, int(config.get("num_val_examples", 200)), metrics

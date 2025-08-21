@@ -1,43 +1,41 @@
 # src/clients/fedper_client.py
 from __future__ import annotations
 from typing import List, Tuple, Dict, Any
-import hashlib
+import hashlib, time, os
 import numpy as np
 import torch
 import flwr as fl
-from flwr.common import Parameters, parameters_to_ndarrays  # 安全转换
+from flwr.common import Parameters, parameters_to_ndarrays
+from privacy.dp import sanitize_update
+from privacy.audit import log_jsonl
 
-# 只联邦含此前缀的层
-BACKBONE_PREFIX = "backbone."
+DEFAULT_SHARE_SUBSTR = "adapter."   # 只共享包含该片段的参数
 
-# ---------- 工具：取 backbone 相关键 ----------
-def _backbone_keys(model: torch.nn.Module) -> List[str]:
-    return [k for k in sorted(model.state_dict().keys()) if k.startswith(BACKBONE_PREFIX)]
+def _match_keys(state: Dict[str, torch.Tensor], share_substr: str) -> List[str]:
+    keys = sorted(state.keys())
+    return [k for k in keys if share_substr in k]  # 只要包含即可（不要求开头）
 
-# ---------- 指纹：基于 backbone 的层顺序/shape/dtype ----------
-def _backbone_signature_from_state(state: Dict[str, torch.Tensor]) -> Dict[str, Any]:
-    keys = [k for k in sorted(state.keys()) if k.startswith(BACKBONE_PREFIX)]
+def _sig_from_state(state: Dict[str, torch.Tensor], share_substr: str) -> Dict[str, Any]:
+    keys = _match_keys(state, share_substr)
     shapes = [tuple(state[k].shape) for k in keys]
     dtypes = [str(state[k].dtype).split(".")[-1] for k in keys]
     payload = f"{len(keys)}|" + "|".join(f"{s}:{d}" for s, d in zip(shapes, dtypes))
     h = hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
     return {"sig_count": len(keys), "sig_hash": h}
 
-# ---------- 打包/解包（仅 backbone） ----------
-def pack_backbone(model: torch.nn.Module) -> List[np.ndarray]:
+def pack_shared(model: torch.nn.Module, share_substr: str) -> List[np.ndarray]:
     state = model.state_dict()
-    keys = _backbone_keys(model)
+    keys = _match_keys(state, share_substr)
     return [state[k].detach().cpu().numpy() for k in keys]
 
-def unpack_backbone(model: torch.nn.Module, arrays: List[np.ndarray]) -> None:
+def unpack_shared(model: torch.nn.Module, arrays: List[np.ndarray], share_substr: str) -> None:
     state = model.state_dict()
-    keys = _backbone_keys(model)
-    assert len(keys) == len(arrays), f"backbone shape mismatch: {len(keys)} vs {len(arrays)}"
+    keys = _match_keys(state, share_substr)
+    assert len(keys) == len(arrays), f"shared shape mismatch: {len(keys)} vs {len(arrays)}"
     for k, arr in zip(keys, arrays):
         state[k] = torch.tensor(arr, dtype=state[k].dtype)
     model.load_state_dict(state, strict=False)
 
-# ---------- 安全转换 / 防御式加载（仅 backbone） ----------
 def _to_arrays(parameters_or_arrays) -> List[np.ndarray]:
     if isinstance(parameters_or_arrays, list):
         return parameters_or_arrays
@@ -45,42 +43,15 @@ def _to_arrays(parameters_or_arrays) -> List[np.ndarray]:
         return parameters_to_ndarrays(parameters_or_arrays)
     return parameters_or_arrays  # type: ignore
 
-def _maybe_load_backbone(
-    model: torch.nn.Module,
-    arrays: List[np.ndarray],
-    expected_sig: Dict[str, Any] | None = None,
-) -> bool:
-    keys = _backbone_keys(model)
-    if not isinstance(arrays, list) or len(arrays) != len(keys):
-        print(f"[warn] backbone param length mismatch: expect={len(keys)}, got={len(arrays) if isinstance(arrays, list) else '??'}. Skip.")
-        return False
-    if expected_sig is not None:
-        local_sig = _backbone_signature_from_state(model.state_dict())
-        if (local_sig.get("sig_count") != expected_sig.get("sig_count")
-            or local_sig.get("sig_hash") != expected_sig.get("sig_hash")):
-            print(f"[warn] backbone signature mismatch: local={local_sig}, expected={expected_sig}. Skip.")
-            return False
-    try:
-        unpack_backbone(model, arrays)
-        return True
-    except AssertionError as e:
-        print(f"[warn] unpack backbone failed: {e}. Skip.")
-        return False
-
-# ---------- 仅用于示例训练/评估生成 dummy 时序 ----------
 def _get_model_specs(model: torch.nn.Module):
     seq_len = getattr(model, "seq_len", 32)
     in_dim  = getattr(model, "in_dim", 16)
     out_dim = getattr(model, "out_dim", 1)
     return seq_len, in_dim, out_dim
 
-# ========= 你接入真实数据/训练的两处 =========
 def user_train_one_round(model: torch.nn.Module, model_name: str, cid: str, config: Dict[str, Any]) -> Dict[str, float]:
-    """
-    TODO: 用你的 DataLoader/Lightning 替换这里。保持返回指标字典即可。
-    """
     model.train()
-    opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+    opt = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=float(config.get("lr", 1e-3)))
     T, F, O = _get_model_specs(model)
     x = torch.randn(256, T, F); y = torch.randn(256, O)
     pred = model(x)
@@ -89,9 +60,6 @@ def user_train_one_round(model: torch.nn.Module, model_name: str, cid: str, conf
     return {"train_loss": float(loss.item())}
 
 def user_evaluate(model: torch.nn.Module, model_name: str, cid: str, config: Dict[str, Any]) -> Tuple[float, Dict[str, float]]:
-    """
-    TODO: 用你的验证逻辑替换。返回 (loss, metrics)。
-    """
     model.eval()
     T, F, O = _get_model_specs(model)
     with torch.no_grad():
@@ -99,46 +67,102 @@ def user_evaluate(model: torch.nn.Module, model_name: str, cid: str, config: Dic
         pred = model(x)
         loss = torch.nn.functional.mse_loss(pred, y)
     return float(loss.item()), {"val_loss": float(loss.item())}
-# ============================================
 
 class FedPerClient(fl.client.NumPyClient):
     """
-    个性化联邦：只联邦 backbone；head 本地保留。
-    - 自动上报 backbone“指纹”（sig_count/sig_hash）
-    - 训练/评估阶段都做防御式加载：不匹配就跳过，绝不崩
+    个性化联邦（Adapter/LoRA 版）：
+    - 只共享 state_dict 中键名包含 share_substr 的参数（默认 'adapter.'）
+    - 非 adapter 参数建议冻结（在构建模型时处理）
     """
-    def __init__(self, model: torch.nn.Module, model_name: str, cid: str):
+    def __init__(self, model: torch.nn.Module, model_name: str, cid: str, share_substr: str = DEFAULT_SHARE_SUBSTR):
         self.model = model
         self.model_name = model_name
         self.cid = cid
+        self.share_substr = share_substr
 
-    # ⭐ 关键：上报模型名 + backbone 签名，供服务器按指纹自动匹配
     def get_properties(self, config):
-        sig = _backbone_signature_from_state(self.model.state_dict())
+        sig = _sig_from_state(self.model.state_dict(), self.share_substr)
         return {"model_name": self.model_name, "sig_count": sig["sig_count"], "sig_hash": sig["sig_hash"]}
 
-    # 只共享 backbone
     def get_parameters(self, config):
-        return pack_backbone(self.model)
+        return pack_shared(self.model, self.share_substr)
 
     def fit(self, parameters, config):
-        arrays = _to_arrays(parameters)
+        arrays_in = _to_arrays(parameters)
         expected_sig = {k: config[k] for k in ["sig_count", "sig_hash"] if k in config}
-        _maybe_load_backbone(self.model, arrays, expected_sig=expected_sig)
 
+        # 尝试加载（不匹配就跳过）
+        try:
+            st = self.model.state_dict()
+            local_sig = _sig_from_state(st, self.share_substr)
+            if (expected_sig.get("sig_count") == local_sig.get("sig_count")
+                and expected_sig.get("sig_hash") == local_sig.get("sig_hash")
+                and isinstance(arrays_in, list)
+                and len(arrays_in) == local_sig.get("sig_count", -1)):
+                unpack_shared(self.model, arrays_in, self.share_substr)
+            else:
+                print(f"[warn] adapter signature mismatch or len mismatch, skip loading. expected={expected_sig}, local={local_sig}, got_len={len(arrays_in) if isinstance(arrays_in, list) else '??'}")
+        except Exception as e:
+            print(f"[warn] unpack shared failed: {e}. Skip.")
+
+        # 训练（仅 adapter 参与梯度）
         train_metrics = user_train_one_round(self.model, self.model_name, self.cid, config)
-        new_params = pack_backbone(self.model)
+        new_params = pack_shared(self.model, self.share_substr)
 
-        sig = _backbone_signature_from_state(self.model.state_dict())
+        # delta 范数（审计）
+        prev = arrays_in if isinstance(arrays_in, list) else []
+        delta_norm = None
+        if prev and len(prev) == len(new_params):
+            delta = [n - p for n, p in zip(new_params, prev)]
+            delta_norm = float(np.sqrt(sum(float((d.astype(np.float64) ** 2).sum()) for d in delta)))
+
+        # 本地 DP
+        dp_mode  = str(config.get("dp_mode", "client"))
+        dp_clip  = float(config.get("dp_clip", 0.0))
+        dp_sigma = float(config.get("dp_sigma", 0.0))
+        dp_sig   = str(config.get("dp_sig", ""))
+        policy_id = str(config.get("dp_policy_id", ""))
+        applied = False
+        est_post_clip = min(delta_norm, dp_clip) if (delta_norm is not None and dp_clip > 0) else delta_norm
+        if dp_mode == "client" and (dp_clip > 0 or dp_sigma > 0) and prev and len(prev) == len(new_params):
+            new_params = sanitize_update(prev, new_params, dp_clip, dp_sigma)
+            applied = True
+
+        # 客户端审计日志
+        log_jsonl(os.path.join("bench_results", "clients", f"cid_{self.cid}_privacy.jsonl"), {
+            "ts": time.time(),
+            "cid": self.cid,
+            "model_name": self.model_name,
+            "policy_id": policy_id,
+            "dp_sig": dp_sig,
+            "dp_mode": dp_mode,
+            "dp": {"clip": dp_clip, "sigma": dp_sigma},
+            "delta_norm": delta_norm,
+            "est_post_clip_norm": est_post_clip,
+            "applied": applied,
+            "train_metrics": train_metrics,
+            "share_substr": self.share_substr,
+        })
+
+        sig = _sig_from_state(self.model.state_dict(), self.share_substr)
         metrics = {"model_name": self.model_name, **sig, **train_metrics}
         num_examples = int(config.get("num_examples", 1000))
         return new_params, num_examples, metrics
 
     def evaluate(self, parameters, config):
         arrays = _to_arrays(parameters)
-        expected_sig = {k: config[k] for k in ["sig_count", "sig_hash"] if k in config}
-        _maybe_load_backbone(self.model, arrays, expected_sig=expected_sig)
-
+        try:
+            st = self.model.state_dict()
+            local_sig = _sig_from_state(st, self.share_substr)
+            expected_sig = {k: config[k] for k in ["sig_count", "sig_hash"] if k in config}
+            if (expected_sig.get("sig_count") == local_sig.get("sig_count")
+                and expected_sig.get("sig_hash") == local_sig.get("sig_hash")
+                and isinstance(arrays, list)
+                and len(arrays) == local_sig.get("sig_count", -1)):
+                unpack_shared(self.model, arrays, self.share_substr)
+        except Exception as e:
+            print(f"[warn] eval unpack shared failed: {e}. Skip.")
         loss, metrics = user_evaluate(self.model, self.model_name, self.cid, config)
-        metrics.update(_backbone_signature_from_state(self.model.state_dict()))
+        metrics.update(_sig_from_state(self.model.state_dict(), self.share_substr))
         return loss, int(config.get("num_val_examples", 200)), metrics
+                                             
