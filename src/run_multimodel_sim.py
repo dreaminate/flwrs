@@ -30,7 +30,7 @@ def parse_args():
     p.add_argument("--dp_sigma", type=float, default=0.0)
     p.add_argument("--fedopt_variant", type=str, default="adam", choices=["adam", "yogi"])
     p.add_argument("--fedopt_lr", type=float, default=0.01)
-    p.add_argument("--min_fit", type=int, default=10)
+    p.add_argument("--min_fit", type=int, default=2)
     return p.parse_args()
 
 def assign_fn_factory(model_names: List[str]):
@@ -67,12 +67,16 @@ def main():
 
     if args.strategy == "multimodel":
         init_map = build_init_params_map(model_names)
+        if args.clients <= 2:
+            frac_fit, frac_eval = 1.0, 1.0
+        else:
+            frac_fit, frac_eval = 0.33, 0.25
         strategy = MultiModelCohort(
             init_params_map=init_map,
             assign_fn=assign_fn_factory(model_names),
             aggregator=args.aggregator,
             trim_ratio=args.trim_ratio,
-            fraction_fit=0.33, fraction_evaluate=0.25,
+            fraction_fit=frac_fit, fraction_evaluate=frac_eval,
             min_fit_clients=args.min_fit, min_available_clients=args.min_fit,
             accept_failures=True,
         )
