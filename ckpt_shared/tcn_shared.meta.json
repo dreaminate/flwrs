@@ -115,5 +115,6 @@
   ],
   "strategy": "fedper_cohort",
   "share_prefix": "adapter.",
-  "dp_mode": "client"
+  "dp_mode": "client",
+  "policy_id": "dpv1"
 }

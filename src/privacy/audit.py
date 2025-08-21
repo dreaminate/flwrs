@@ -7,10 +7,13 @@ def ensure_dir_for(path: str) -> None:
     if d and not os.path.isdir(d):
         os.makedirs(d, exist_ok=True)
 
-def log_jsonl(path: str, obj: Dict[str, Any]) -> None:
-    ensure_dir_for(path)
+
+def log_jsonl(path: str, record: dict) -> None:
+    d = os.path.dirname(path)
+    if d and not os.path.exists(d):
+        os.makedirs(d, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 def cfg_hash(d: Dict[str, Any], length: int = 16) -> str:
     s = json.dumps(d, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
@@ -18,3 +21,4 @@ def cfg_hash(d: Dict[str, Any], length: int = 16) -> str:
 
 def anon(s: str, length: int = 8) -> str:
     return hashlib.sha1(s.encode("utf-8")).hexdigest()[:length]
+

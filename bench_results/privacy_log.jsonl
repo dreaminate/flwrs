@@ -13,3 +13,13 @@
 {"ts": 1755764915.5103207, "round": 4, "bucket": "ts_transformer", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.6, "delta": 1e-05}, "epsilon": 21.550641929515827, "num_results": 1}
 {"ts": 1755764916.022475, "round": 5, "bucket": "tcn", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.8, "delta": 1e-05}, "epsilon": 17.31853766430842, "num_results": 1}
 {"ts": 1755764916.0234752, "round": 5, "bucket": "ts_transformer", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.6, "delta": 1e-05}, "epsilon": 24.827494663522337, "num_results": 1}
+{"ts": 1755769381.516579, "round": 1, "bucket": "tcn", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.8, "delta": 1e-05}, "epsilon": 6.779407390235101, "num_results": 1}
+{"ts": 1755769381.5175626, "round": 1, "bucket": "ts_transformer", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.6, "delta": 1e-05}, "epsilon": 9.386432075869024, "num_results": 1}
+{"ts": 1755769381.9992611, "round": 2, "bucket": "ts_transformer", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.6, "delta": 1e-05}, "epsilon": 14.088011818469631, "num_results": 1}
+{"ts": 1755769381.9992611, "round": 2, "bucket": "tcn", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.8, "delta": 1e-05}, "epsilon": 10.04517553051889, "num_results": 1}
+{"ts": 1755769382.416501, "round": 3, "bucket": "tcn", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.8, "delta": 1e-05}, "epsilon": 12.732863351681935, "num_results": 1}
+{"ts": 1755769382.416501, "round": 3, "bucket": "ts_transformer", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.6, "delta": 1e-05}, "epsilon": 18.01881780224258, "num_results": 1}
+{"ts": 1755769382.8568454, "round": 4, "bucket": "ts_transformer", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.6, "delta": 1e-05}, "epsilon": 21.550641929515827, "num_results": 1}
+{"ts": 1755769382.8568454, "round": 4, "bucket": "tcn", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.8, "delta": 1e-05}, "epsilon": 15.121314780470202, "num_results": 1}
+{"ts": 1755769383.2775602, "round": 5, "bucket": "tcn", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.8, "delta": 1e-05}, "epsilon": 17.31853766430842, "num_results": 1}
+{"ts": 1755769383.2785609, "round": 5, "bucket": "ts_transformer", "dp_mode": "client", "policy_id": "dpv1", "dp": {"clip": 1.0, "sigma": 0.6, "delta": 1e-05}, "epsilon": 24.827494663522337, "num_results": 1}
