@@ -103,7 +103,7 @@ python .\src\run_multimodel_sim.py --strategy fedper_cohort --models ts_transfor
 python .\src\run_multimodel_sim.py --strategy fedopt --models lstm --rounds 30 --clients 50 --min_fit 30 --lr 5e-4 --aggregator weighted --dp_mode none --fedopt_variant yogi --fedopt_lr 0.01
 ```
 
-> 小贴士：请使用**修复版** `src/strategies/fedopt.py`（首轮初始化动量并规范返回），否则可能报 `NoneType` 错。你可以直接采用我给你的替换实现。
+> 小贴士：请使用**修复版** `src/strategies/fedopt.py`（首轮初始化动量并规范返回），否则可能报 `NoneType` 错。你可以直接采用这里的替换实现。
 
 ### 鲁棒 DP-FedProx（中位数 + 服务器端 DP）
 
@@ -139,42 +139,37 @@ python .\src\run_multimodel_sim.py --strategy fedper --models ts_transformer --r
 ### 2) FedOpt（Yogi）服务器端优化
 
 * **做什么**：先 **FedAvg** 出目标参数，再在**服务器端**用 **Yogi/Adam** 对全局参数来一步优化（`--fedopt_lr` 控制步长）。
-* **意义**：缓解非 IID 造成的震荡，**更平滑**地更新全局。
+* **意义**：缓解 non-IID 震荡，**更平滑**地更新全局。
 * **关键参数**：`--fedopt_variant yogi|adam`，`--fedopt_lr`。
 * **取舍**：步长太大可能发散，太小更新慢；一般从 `1e-2~1e-3` 试。
 
 ### 3) 鲁棒 DP-FedProx（中位数 + 服务器端 DP）
 
-* **做什么**：
-
-  * 聚合用 **中位数**（或可选截尾均值）抗异常；
-  * **服务器端 DP**：对聚合更新做裁剪 + 加噪；
-  * **FedProx** 本地加入 `μ‖w-w_global‖^2` 约束。
-* **意义**：兼顾**隐私**与**鲁棒性**，适合 noisy/outlier/对抗场景。
+* **做什么**：中位数/截尾均值抗异常；**服务器端 DP** 对聚合更新裁剪+加噪；本地加入 **FedProx** 正则。
+* **意义**：兼顾**隐私**与**鲁棒性**。
 * **关键参数**：`--aggregator median|trimmed`、`--trim_ratio`、`--dp_mode server`、`--dp_max_norm`、`--dp_sigma`、`--mu_prox`。
 * **取舍**：`dp_sigma` 大→精度掉；`mu_prox` 大→本地学习受限。
 
 ### 4) 多模型同轮分桶 + 截尾均值
 
-* **做什么**：`multimodel` 在**同一轮**同时推进多模型（如 `lstm,tcn,ts_transformer`），按指纹自动分桶，各桶内独立聚合；聚合器用 **截尾均值**。
-* **意义**：并行推进**异构模型**；便于**对比实验**。
+* **做什么**：`multimodel` 同轮推进多模型（如 `lstm,tcn,ts_transformer`），按指纹分桶，各桶独立聚合；聚合器用 **截尾均值**。
+* **意义**：并行推进**异构模型**，便于**对比实验**。
 * **关键参数**：`--models`、`--aggregator trimmed`、`--trim_ratio`（建议 0.05\~0.2）。
 * **取舍**：单桶有效样本过少会不稳。
 
 ### 5) FedPer（非分桶）+ 客户端 DP + 共享 `encoder.`
 
-* **做什么**：经典 FedPer：**只上传**包含 `encoder.` 的参数，其余保持个性化（`--freeze_non_adapter` 可不训练非共享部分）；上传前做**本地 DP**。
+* **做什么**：**只上传**包含 `encoder.` 的参数，其余保持个性化；上传前做**本地 DP**。
 * **意义**：在**个性化/隐私**与**协作**间折中。
 * **关键参数**：`--dp_mode client`、`--dp_clip_map/--dp_sigma_map`、`--share_prefix`。
 * **取舍**：共享子集太小→全局进步慢；`dp_sigma` 过大→性能降。
 
 > **选型速查**
->
-> * 先跑通：冒烟（FedPer-Cohort，单模型，无 DP）
-> * 更稳更平滑：FedOpt（Yogi/Adam）
-> * 隐私与鲁棒：鲁棒 DP-FedProx（中位/截尾 + 服务器端 DP）
-> * 多模型并行：MultiModel（同轮分桶）
-> * 强个性化：FedPer（共享 `encoder.`/`adapter.`；可加本地 DP）
+> 先跑通：冒烟（FedPer-Cohort，单模型，无 DP）
+> 更稳更平滑：FedOpt（Yogi/Adam）
+> 隐私与鲁棒：鲁棒 DP-FedProx（中位/截尾 + 服务器端 DP）
+> 多模型并行：MultiModel（同轮分桶）
+> 强个性化：FedPer（共享 `encoder.`/`adapter.`；可加本地 DP）
 
 ---
 
@@ -182,13 +177,13 @@ python .\src\run_multimodel_sim.py --strategy fedper --models ts_transformer --r
 
 ### 速查表
 
-| 策略 (`--strategy`) | `--models` 多模型 | `--aggregator` median/trimmed |            `--dp_mode server` | `--dp_mode client` | `--dp_*_map` 分桶DP |  `--share_prefix` 只共享前缀 | `--adapter_mode` LoRA/MLP |
-| ----------------- | -------------: | ----------------------------: | ----------------------------: | -----------------: | ----------------: | ----------------------: | ------------------------: |
-| `multimodel`      |           ✅ 推荐 |                   ✅（按**桶**生效） |                             ✅ |    ✅（作为**全局默认**下发） |           ✅（按模型桶） | ❌（不限制上传；除非用 FedPer 客户端） |                         ✅ |
-| `fedper_cohort`   |    ✅（按**桶**聚合） |                   ✅（按**桶**生效） |                             ✅ |    ✅（作为**全局默认**下发） |           ✅（按模型桶） |              ✅（只上传命中前缀） |                         ✅ |
-| `fedper`          |    ❌（**仅单模型**） |                             ✅ |                             ✅ |                  ✅ |                 ❌ |              ✅（只上传命中前缀） |                         ✅ |
-| `robust`          |    ❌（**仅单模型**） |                             ✅ | ✅（`--dp_max_norm/--dp_sigma`） |                  ✅ |                 ❌ |                 ❌（整模共享） |                         ✅ |
-| `fedopt`          |    ❌（**仅单模型**） |                 ❌（内部先 FedAvg） |                             ✅ |                  ✅ |                 ❌ |                 ❌（整模共享） |                         ✅ |
+| 策略 (`--strategy`) | `--models` 多模型 | `--aggregator` median/trimmed |            `--dp_mode server` | `--dp_mode client` | `--dp_*_map` 分桶DP | `--share_prefix` 只共享前缀 | `--adapter_mode` LoRA/MLP |
+| ----------------- | -------------: | ----------------------------: | ----------------------------: | -----------------: | ----------------: | ---------------------: | ------------------------: |
+| `multimodel`      |           ✅ 推荐 |                   ✅（按**桶**生效） |                             ✅ |    ✅（作为**全局默认**下发） |           ✅（按模型桶） |      ❌（除非用 FedPer 客户端） |                         ✅ |
+| `fedper_cohort`   |    ✅（按**桶**聚合） |                   ✅（按**桶**生效） |                             ✅ |    ✅（作为**全局默认**下发） |           ✅（按模型桶） |             ✅（只上传命中前缀） |                         ✅ |
+| `fedper`          |    ❌（**仅单模型**） |                             ✅ |                             ✅ |                  ✅ |                 ❌ |             ✅（只上传命中前缀） |                         ✅ |
+| `robust`          |    ❌（**仅单模型**） |                             ✅ | ✅（`--dp_max_norm/--dp_sigma`） |                  ✅ |                 ❌ |                ❌（整模共享） |                         ✅ |
+| `fedopt`          |    ❌（**仅单模型**） |                 ❌（内部先 FedAvg） |                             ✅ |                  ✅ |                 ❌ |                ❌（整模共享） |                         ✅ |
 
 **关键注意事项**
 
@@ -199,15 +194,15 @@ python .\src\run_multimodel_sim.py --strategy fedper --models ts_transformer --r
 5. **鲁棒聚合参与数**：`median` ≥3 更稳；`trimmed` 建议 `min_fit ≥ 10` 且 `trim_ratio ≤ 0.2`。
 6. **FedOpt 聚合器**：`fedopt` 无视 `--aggregator`，内部是 FedAvg → 服务器端 Adam/Yogi。
 7. **LoRA/MLP**：`--adapter_mode` 对所有策略都能注入；只有 `fedper`/`fedper_cohort` + `--share_prefix adapter.` 才会“只上传适配器”。
-8. **客户端 DP 提醒**：`client` 模式下，**请用 `--dp_clip_map/--dp_sigma_map`** 设置；`--dp_max_norm/--dp_sigma` 对客户端不生效。
+8. **客户端 DP 提醒**：`client` 模式下，请用 `--dp_clip_map/--dp_sigma_map` 设置；`--dp_max_norm/--dp_sigma` 对客户端不生效。
 
 **组合建议**
 
-* **先跑通**：`fedper_cohort` + 单模型 + `aggregator=weighted` + `dp_mode=none`
-* **更稳**：`fedopt`（Yogi/Adam）+ 单模型
-* **隐私与鲁棒**：`robust` + `aggregator=median/trimmed` + `dp_mode=server` + `dp_max_norm/sigma`
-* **多模型并行**：`multimodel` + `models=lstm,tcn,ts_transformer` + `aggregator=trimmed` + 可选分桶 DP *map*
-* **强个性化**：`fedper`/`fedper_cohort` + `--share_prefix adapter.` + `--freeze_non_adapter` + 可选 `dp_mode=client`
+* 先跑通：`fedper_cohort` + 单模型 + `aggregator=weighted` + `dp_mode=none`
+* 更稳：`fedopt`（Yogi/Adam）+ 单模型
+* 隐私与鲁棒：`robust` + `aggregator=median/trimmed` + `dp_mode=server` + `dp_max_norm/sigma`
+* 多模型并行：`multimodel` + `models=lstm,tcn,ts_transformer` + `aggregator=trimmed` + 可选分桶 DP *map*
+* 强个性化：`fedper`/`fedper_cohort` + `--share_prefix adapter.` + `--freeze_non_adapter` + 可选 `dp_mode=client`
 
 ---
 
@@ -288,55 +283,39 @@ python .\src\run_bench.py --config .\experiments.yaml --out .\bench_results
 
 ### 1) 在 `timeseries.py` 实现模型（建议接口）
 
-* 参考现有 `LSTMForecaster/TCNForecaster/TransformerForecaster/NBeatsLite`，保持**前向签名**：
-
-  * 输入张量：`x` 形状 `(B, T, F)`（批、序列长、特征数）
-  * 输出张量：`(B, out_dim)`
-* 构造函数建议包含：`in_dim`, `seq_len`, `out_dim`（与注册表的默认参数对齐）
-* 若希望兼容 `inject_adapters()`，尽量使用标准 `nn.Linear/nn.Conv` 层（便于 LoRA/MLP 注入）。
+* 参考 `LSTMForecaster/TCNForecaster/TransformerForecaster/NBeatsLite`，前向：输入 `(B,T,F)` → 输出 `(B,out_dim)`
+* 构造函数建议包含：`in_dim`, `seq_len`, `out_dim`
+* 为兼容 `inject_adapters()`，尽量用标准 `nn.Linear/nn.Conv` 作为可注入点。
 
 ### 2) 在 `models/registry.py` 注册构建器
 
-* 添加一个 builder，并把键名加入 `MODEL_BUILDERS`。例如：
-
 ```python
 # models/registry.py
+from .timeseries import MyFancyForecaster
 DEFAULT_SEQ_LEN = 32
 DEFAULT_IN_DIM  = 16
 DEFAULT_OUT_DIM = 1
 
-from .timeseries import MyFancyForecaster
-
-def make_myfancy() -> nn.Module:
-    return MyFancyForecaster(
-        in_dim=DEFAULT_IN_DIM,
-        seq_len=DEFAULT_SEQ_LEN,
-        out_dim=DEFAULT_OUT_DIM
-    )
+def make_myfancy():
+    return MyFancyForecaster(in_dim=DEFAULT_IN_DIM, seq_len=DEFAULT_SEQ_LEN, out_dim=DEFAULT_OUT_DIM)
 
 MODEL_BUILDERS.update({
     "myfancy": make_myfancy,
-    # 可选：别名
-    "fancy": make_myfancy,
+    "fancy": make_myfancy,  # 可选别名
 })
 ```
 
 > 之后即可用：`--models myfancy`，或与其他模型并行：`--models lstm,myfancy,ts_transformer`（仅限 `multimodel/fedper_cohort`）。
 
-### 3) 适配器与 FedPer 前缀（可选但强烈建议）
+### 3) 适配器与 FedPer 前缀（可选）
 
-* 如果希望 **只上传适配器**：
+* 只上传适配器：`--adapter_mode lora --share_prefix adapter. --freeze_non_adapter`
+* 只上传编码器：为编码器层加名 `encoder.*`，运行时用 `--share_prefix encoder. --freeze_non_adapter`
 
-  * 在运行时启用：`--adapter_mode lora --share_prefix adapter. --freeze_non_adapter`
-  * 确保 `inject_adapters()` 能在你的层上插入模块（通常支持 `nn.Linear`）
-* 如果希望只上传**编码器前缀**：把你的编码器层命名为 `encoder.*`，运行时用
-  `--share_prefix encoder. --freeze_non_adapter`
-
-### 4) 形状与分桶兼容性
+### 4) 形状与分桶
 
 * **单模型策略**（`fedopt/robust/fedper`）要求**所有客户端模型同形状**（参数维度一致）。
 * **多模型策略**（`multimodel/fedper_cohort`）按**模型键名**分桶；**每个桶内**形状需一致。
-
 
 ### 5) 冒烟测试你的新模型
 
@@ -348,8 +327,8 @@ python .\src\run_multimodel_sim.py --strategy fedper_cohort --models myfancy --r
 python .\src\run_multimodel_sim.py --strategy multimodel --models lstm,myfancy,ts_transformer --rounds 2 --clients 6 --min_fit 3 --lr 1e-3 --aggregator trimmed --trim_ratio 0.1 --dp_mode none
 ```
 
-> 如需只共享适配器：加 `--adapter_mode lora --share_prefix adapter. --freeze_non_adapter`
-> 如需客户端 DP：加 `--dp_mode client --dp_clip_map myfancy:1.0 --dp_sigma_map myfancy:0.8`
+> 只共享适配器：加 `--adapter_mode lora --share_prefix adapter. --freeze_non_adapter`
+> 客户端 DP：加 `--dp_mode client --dp_clip_map myfancy:1.0 --dp_sigma_map myfancy:0.8`
 
 ---
 
@@ -381,6 +360,54 @@ python .\src\run_multimodel_sim.py --strategy multimodel --models lstm,myfancy,t
 
 ---
 
+## 🧭 路线图 / Future Plan
+
+* **DP 调度器（Noise/Clip Scheduler）**
+
+  * 像学习率调度器一样，按轮动态调整 `σ/clip`。
+  * 计划支持：`--dp_sched {const,cosine,linear,warmup}` 与 `--dp_sched_warmup`（前若干轮 warmup）。
+  * 与 `privacy/accountant.py` 联动，实现**目标 ε/δ 驱动**、训练中**预算累计**与**早停**。
+* **服务器端 DP 调度**：在 `robust_dp_fedprox.py`、`multimodel_cohort.py`、`fedper_cohort.py` 中按 `server_round` 缩放各桶 `sigma`。
+* **安全聚合（Secure Aggregation, 成对掩码）**：隐藏单客户端更新，降低反推风险；与 DP 可叠加。
+* **分群/分桶自适应配置**：按客户端统计/指标动态下发 `clip/sigma`、适配器 rank、参与率等。
+* **Opacus/TFF 选件**：可切换为 Opacus（PyTorch）或 TFF（TensorFlow）的 DP 组件与调度器。
+* **鲁棒聚合增强**：Krum、Bulyan、Coordinate-wise median/trimmed 等可插拔。
+* **可视化**：ε-轮次曲线、隐私-精度帕累托前沿、分桶对比图。
+
+---
+
+## 🧮 DP 调度器（预览接口）
+
+> 本节为预览设计，合并后即可使用；与现有 CLI 兼容。
+
+```powershell
+# 客户端 DP 调度（余弦退火），均值归一化保证总预算稳定
+python .\src\run_multimodel_sim.py ^
+  --strategy fedper_cohort --models ts_transformer ^
+  --rounds 30 --clients 30 --min_fit 15 ^
+  --dp_mode client --dp_clip_map ts_transformer:1.0 --dp_sigma_map ts_transformer:0.9 ^
+  --dp_sched cosine --dp_sched_warmup 0.1
+```
+
+> 思路：在 `on_fit_config_fn(rnd)` 中按轮缩放 `sigma`；若设目标 `(ε*, δ)`，在 `privacy/accountant.py` 里累计 zCDP，达到阈值提前停止。
+
+---
+
+## 📚 FedAvg / Adam / Yogi 对比与选型
+
+| 算法          | 思想                                             | 优点                  | 可能问题          | 适用建议              |
+| ----------- | ---------------------------------------------- | ------------------- | ------------- | ----------------- |
+| **FedAvg**  | 各客户端本地训练后，按样本数加权**平均参数**                       | 简单稳定、通信少            | 非 IID 时易抖/收敛慢 | 作为基线；数据较均衡时足够     |
+| **FedAdam** | 用 `g = target - params` 作“梯度”，服务器端 **Adam** 更新 | 自适应动量，收敛更平滑/通常更快    | 步长不当可能发散；超参敏感 | 想加速/平滑、分布差异中等     |
+| **FedYogi** | 与 Adam 类似，但二阶动量更新抑制无界增长                        | 对高方差/非 IID 更稳健，不易发散 | 仍需调 `lr`；可能略慢 | non-IID 明显或震荡大时优先 |
+
+**本项目实现**：`--strategy fedopt` 先做 **FedAvg** 得目标参数，再用 **Adam/Yogi** 在服务器端更新（`--fedopt_variant adam|yogi`，`--fedopt_lr` 控制步长）。
+**实践建议**：先用 FedAvg 对齐流程 → 试 Yogi（更稳）→ 再试 Adam（更快）。`--fedopt_lr` 从 `1e-3~1e-2` 起试。
+
+---
+
 ## 📝 许可证
 
 根据你的项目选择（MIT/Apache-2.0/BSD-3-Clause 等）。
+
+---
