@@ -1,30 +1,41 @@
-# 批量实验清单：每个 experiment 一次模拟
+defaults:
+  rounds: 10
+  clients: 20
+  min_fit: 10
+  lr: 0.001
+  aggregator: weighted
+  dp_mode: none
+  adapter_mode: none
+
 experiments:
-  - name: "cohort_trimmed"
-    strategy: "multimodel"
-    models: ["tft", "tcn", "nbeats"]
-    rounds: 20
-    clients: 30
-    params:
-      aggregator: "trimmed"
-      trim_ratio: 0.1
+  - name: fedper_lora_only_adapter
+    strategy: fedper_cohort
+    models: ts_transformer
+    adapter_mode: lora
+    adapter_rank: 8
+    adapter_alpha: 16
+    adapter_dropout: 0.05
+    share_prefix: adapter.
+    freeze_non_adapter: true
 
-  - name: "robust_median_fedprox"
-    strategy: "robust"
-    models: ["tft"]          # 单模型族示例
-    rounds: 20
-    clients: 24
-    params:
-      aggregator: "median"
-      mu_prox: 0.01
-      dp_max_norm: 1.0
-      dp_sigma: 0.0
+  - name: fedopt_yogi_lstm
+    strategy: fedopt
+    models: lstm
+    fedopt_variant: yogi
+    fedopt_lr: 0.01
 
-  - name: "fedopt_adam"
-    strategy: "fedopt"
-    models: ["tft"]
-    rounds: 20
-    clients: 24
-    params:
-      fedopt_variant: "adam"
-      fedopt_lr: 0.03
+  - name: robust_dp_tcn
+    strategy: robust
+    models: tcn
+    aggregator: median
+    mu_prox: 0.01
+    dp_mode: server
+    dp_max_norm: 1.5
+    dp_sigma: 0.6
+    dp_policy_id: robust_demo
+
+  - name: multimodel_trimmed
+    strategy: multimodel
+    models: lstm,tcn,ts_transformer
+    aggregator: trimmed
+    trim_ratio: 0.1

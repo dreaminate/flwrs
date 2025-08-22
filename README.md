@@ -1,3 +1,4 @@
+
 # Federated Multi-Model Cohort (MPC) — README
 
 > 端到端的联邦学习多模型模拟框架。支持 FedPer / FedPerCohort / FedOpt / MultiModel / 鲁棒 DP-FedProx；内置 LoRA/MLP 适配器注入、(ε,δ)-DP 与 zCDP 记账、批量基准实验编排。
@@ -20,7 +21,6 @@
 
 ## 📦 目录结构
 
-```
 src/
 ├── run_bench.py                # 基准运行器（批量读取 experiments.yaml）
 ├── run_multimodel_sim.py       # 多模型联邦模拟主程序（CLI 入口）
@@ -46,7 +46,6 @@ src/
 └── data/                       # 数据与输出（可自定义）
 bench_results/                  # run_bench 的结果汇总
 experiments.yaml                # 批量实验配置
-```
 
 ---
 
@@ -121,8 +120,6 @@ python .\src\run_multimodel_sim.py --strategy fedper --models ts_transformer --r
 ---
 
 ## 🧩 DP Map 传参示例（分模型/分桶）
-
-**JSON 字符串（推荐）**
 
 ```powershell
 python .\src\run_multimodel_sim.py --strategy multimodel --models lstm,ts_transformer --rounds 10 --clients 20 --min_fit 10 --dp_mode server --dp_clip_map '{"lstm":1.0,"ts_transformer":0.7}' --dp_sigma_map '{"lstm":0.8,"ts_transformer":0.6}' --dp_delta_map '{"lstm":1e-5,"ts_transformer":1e-6}'
@@ -204,7 +201,7 @@ python .\src\run_bench.py --config .\experiments.yaml --out .\bench_results
 ## 🧯 故障排查
 
 * `KeyError: 'transformer'`：请用 **`ts_transformer`**（或 `tft`）作为模型名；或在注册表中添加 `transformer` 的别名映射。
-* `ModuleNotFoundError`/找不到脚本：请先 `cd` 到仓库根目录；必要时用绝对路径。
+* `ModuleNotFoundError` / 找不到脚本：请先 `cd` 到仓库根目录；必要时用绝对路径。
 * 共享子集为空：确认已注入适配器且前缀与 `--share_prefix` 一致；查看日志“共享参数计数/占比”。
 * DP 噪声过大导致精度下降：增大 `--dp_max_norm` 或减小 `--dp_sigma`；结合 zCDP 记账评估 `rounds × sample_fraction`。
 * `TypeError: unexpected keyword`：以 `--help` 为准对齐参数；不同策略/Flower 版本签名可能不同。
