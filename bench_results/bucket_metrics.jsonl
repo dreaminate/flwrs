@@ -48,3 +48,4 @@
 {"ts": 1755769383.2795599, "round": 5, "type": "train", "bucket": "ts_transformer", "loss": 1.531130313873291, "n": 1000}
 {"ts": 1755769383.3580425, "round": 5, "type": "val", "bucket": "tcn", "loss": 1.5222225189208984, "n": 200}
 {"ts": 1755769383.3580425, "round": 5, "type": "val", "bucket": "ts_transformer", "loss": 1.0188822746276855, "n": 200}
+{"ts": 1755831695.5370786, "round": 1, "type": "val", "bucket": "ts_transformer", "loss": 1.3129631280899048, "n": 400}
