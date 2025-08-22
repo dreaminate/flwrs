@@ -1,0 +1,1 @@
+{"ts": 1755832494.6849701, "cid": "13423891782134984005", "model_name": "lstm", "policy_id": "", "dp_sig": "", "dp_mode": "none", "dp": {"clip": 0.0, "sigma": 0.0, "epsilon": 0.0, "delta": 0.0, "sensitivity": 1.0}, "delta_norm": 23.574512972170833, "est_post_clip_norm": 23.574512972170833, "applied": false, "train_metrics": {"train_loss": 1.3488785028457642}}

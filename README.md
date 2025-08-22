@@ -1,3 +1,4 @@
+---
 
 # Federated Multi-Model Cohort (MPC) — README
 
@@ -20,8 +21,8 @@
 ---
 
 ## 📦 目录结构
-```
 
+```
 src/
 ├── run_bench.py                # 基准运行器（批量读取 experiments.yaml）
 ├── run_multimodel_sim.py       # 多模型联邦模拟主程序（CLI 入口）
@@ -118,6 +119,57 @@ python .\src\run_multimodel_sim.py --strategy multimodel --models lstm,tcn,ts_tr
 ```powershell
 python .\src\run_multimodel_sim.py --strategy fedper --models ts_transformer --rounds 10 --clients 20 --min_fit 10 --lr 1e-3 --aggregator weighted --dp_mode client --dp_max_norm 1.0 --dp_sigma 0.8 --share_prefix encoder. --freeze_non_adapter
 ```
+
+---
+
+## 🧠 运行方式解读（这些命令分别做什么）
+
+### 1) 冒烟测试（FedPer-Cohort + TS-Transformer，无 DP）
+
+* **做什么**：`fedper_cohort` + 单模型 `ts_transformer`，1 轮、2 客户端、加权聚合，不加 DP。
+* **意义**：最快验证**端到端链路**（本地训练→上传→分桶聚合→日志）。
+* **机制**：FedPer 的“**分桶**”版，会按模型/签名把客户端分桶并只聚合共享子集（本例等价于整模共享）。
+* **何时用**：首次跑通环境/接口。
+
+### 2) FedOpt（Yogi）服务器端优化
+
+* **做什么**：先 **FedAvg** 出目标参数，再在**服务器端**用 **Yogi/Adam** 对全局参数来一步优化（`--fedopt_lr` 控制步长）。
+* **意义**：缓解非 IID 造成的震荡，**更平滑**地更新全局。
+* **关键参数**：`--fedopt_variant yogi|adam`，`--fedopt_lr`。
+* **取舍**：步长太大可能发散，太小更新慢；一般从 `1e-2~1e-3` 试。
+
+### 3) 鲁棒 DP-FedProx（中位数 + 服务器端 DP）
+
+* **做什么**：
+
+  * 聚合用 **中位数**（或可选截尾均值）抗异常；
+  * **服务器端 DP**：对聚合更新做裁剪 + 加噪；
+  * **FedProx** 本地加入 `μ‖w-w_global‖^2` 约束。
+* **意义**：兼顾**隐私**与**鲁棒性**，适合 noisy/outlier/对抗场景。
+* **关键参数**：`--aggregator median|trimmed`、`--trim_ratio`、`--dp_mode server`、`--dp_max_norm`、`--dp_sigma`、`--mu_prox`。
+* **取舍**：`dp_sigma` 大→精度掉；`mu_prox` 大→本地学习受限。
+
+### 4) 多模型同轮分桶 + 截尾均值
+
+* **做什么**：`multimodel` 在**同一轮**同时推进多模型（如 `lstm,tcn,ts_transformer`），按指纹自动分桶，各桶内独立聚合；聚合器用 **截尾均值**。
+* **意义**：并行推进**异构模型**；便于**对比实验**。
+* **关键参数**：`--models`、`--aggregator trimmed`、`--trim_ratio`（建议 0.05\~0.2）。
+* **取舍**：单桶有效样本过少会不稳。
+
+### 5) FedPer（非分桶）+ 客户端 DP + 共享 `encoder.`
+
+* **做什么**：经典 FedPer：**只上传**包含 `encoder.` 的参数，其余保持个性化（`--freeze_non_adapter` 可不训练非共享部分）；上传前做**本地 DP**。
+* **意义**：在**个性化/隐私**与**协作**间折中。
+* **关键参数**：`--dp_mode client`、`--dp_max_norm`、`--dp_sigma`、`--share_prefix`。
+* **取舍**：共享子集太小→全局进步慢；`dp_sigma` 过大→性能降。
+
+#### 选型速查
+
+* **先跑通**：冒烟（FedPer-Cohort，单模型，无 DP）
+* **更稳更平滑**：FedOpt（Yogi/Adam）
+* **隐私与鲁棒**：鲁棒 DP-FedProx（中位/截尾 + 服务器端 DP）
+* **多模型并行**：MultiModel（同轮分桶）
+* **强调个性化**：FedPer（共享 `encoder.`/`adapter.`；可加本地 DP）
 
 ---
 

@@ -193,15 +193,56 @@ def main():
 
     # 只聚合指标，避免 per-client 明细外泄
     def fit_metrics_aggregation_fn(results):
-        total = sum(num for _, num, _ in results) or 1
-        avg_loss = sum(num * m.get("train_loss", 0.0) for _, num, m in results) / total
-        dp_rate = sum(num * m.get("dp_applied", 0.0) for _, num, m in results) / total
-        return {"loss": float(avg_loss), "dp_applied_rate": float(dp_rate)}
+        """
+        results 可能是：
+        - [(num_examples, metrics), ...]  （新/常见）
+        - [(client, num_examples, metrics), ...]  （旧/某些自定义）
+        """
+        total = 0
+        loss_sum = 0.0
+        dp_sum = 0.0
+
+        for item in results:
+            if len(item) == 2:
+                num, metrics = item
+            elif len(item) == 3:
+                _, num, metrics = item
+            else:
+                # 非预期形状，直接跳过
+                continue
+
+            total += num
+            loss_sum += num * float(metrics.get("train_loss", metrics.get("loss", 0.0)))
+            dp_sum += num * float(metrics.get("dp_applied", 0.0))
+
+        total = total or 1
+        return {
+            "loss": loss_sum / total,
+            "dp_applied_rate": dp_sum / total,
+        }
+
 
     def evaluate_metrics_aggregation_fn(results):
-        total = sum(num for _, num, _ in results) or 1
-        avg_vloss = sum(num * m.get("val_loss", 0.0) for _, num, m in results) / total
-        return {"val_loss": float(avg_vloss)}
+        """
+        同上，兼容 2 元 / 3 元。
+        """
+        total = 0
+        vloss_sum = 0.0
+
+        for item in results:
+            if len(item) == 2:
+                num, metrics = item
+            elif len(item) == 3:
+                _, num, metrics = item
+            else:
+                continue
+
+            total += num
+            # 某些实现只返回 "loss"；做个兜底
+            vloss_sum += num * float(metrics.get("val_loss", metrics.get("loss", 0.0)))
+
+        total = total or 1
+        return {"val_loss": vloss_sum / total}
 
     # 构造策略
     if args.strategy == "multimodel":
